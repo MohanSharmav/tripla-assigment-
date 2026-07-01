@@ -4,7 +4,7 @@
 
 # Backend Engineering Take-Home Assignment: Dynamic Pricing Proxy
 
-Welcome to the Tripla backend engineering take-home assignment\! 🧑‍💻 This exercise is designed to simulate a real-world problem you might encounter as part of our team.
+Welcome to the Tripla backend engineering take-home assignment! 🧑‍💻 This exercise is designed to simulate a real-world problem you might encounter as part of our team.
 
 ⚠️ **Before you begin**, please review the main [FAQ](/README.md#frequently-asked-questions). It contains important information, **including our specific guidelines on how to submit your solution.**
 
@@ -79,4 +79,138 @@ docker compose exec interview-dev ./bin/rails test test/controllers/pricing_cont
 ```
 
 
-Good luck, and we look forward to seeing what you build\!
+Good luck, and we look forward to seeing what you build!
+
+---
+
+# Solution
+
+## Architecture & Design Choices
+
+Rather than introducing additional infrastructure (e.g. Redis, Sidekiq, background refresh workers) for this take-home scope, I implemented a pragmatic Rails-native proxy with clear separation of concerns.
+
+### 1) Service Object + Thin Controller
+
+- **Controller responsibility (`Api::V1::PricingController`)**
+  - Validate request parameters (`period`, `hotel`, `room`)
+  - Delegate pricing retrieval to service
+  - Return clean JSON responses (`200`, `400`, `503`)
+
+- **Service responsibility (`Api::V1::PricingService`)**
+  - Build upstream request
+  - Apply cache policy
+  - Handle timeout/network/upstream errors
+
+This keeps HTTP orchestration and resilience logic out of the controller and makes behavior easier to test.
+
+### 2) Cache-Aside Pattern with Rails Cache
+
+- Uses `Rails.cache.fetch(cache_key, expires_in: 5.minutes, race_condition_ttl: 10.seconds)`
+- Cache key format: `rate_v1/<hotel>/<room>/<period>`
+
+**Why this works for the assignment:**
+- 5-minute freshness requirement is enforced directly at cache layer.
+- In-memory cache (`:memory_store`) is sufficient for a single-node take-home setup.
+
+### 3) Thundering Herd Protection
+
+At cache expiry, concurrent requests for the same key can stampede the upstream model.
+
+Using `race_condition_ttl: 10.seconds` allows only one request to refresh while others are temporarily served stale-but-recent values, protecting the single API token budget under burst traffic.
+
+### 4) Defensive Upstream Handling
+
+`Api::V1::PricingService` includes:
+
+- **Aggressive timeouts**
+  - `open_timeout = 1s`
+  - `timeout = 2s`
+- **Explicit upstream error mapping**
+  - Non-2xx upstream responses log details and raise `PricingService::UpstreamError`
+  - Timeout/connection failures raise `PricingService::UpstreamError`
+- **Client-safe API behavior**
+  - Controller rescues service errors and returns JSON `503 Service Unavailable`
+
+---
+
+## Upstream API Contract Notes
+
+The upstream `rate-api` contract in this environment is:
+
+- `POST /pricing`
+- Header: `token: <API_TOKEN>`
+- Body:
+
+```json
+{
+  "attributes": [
+    {
+      "period": "Summer",
+      "hotel": "FloatingPointResort",
+      "room": "SingletonRoom"
+    }
+  ]
+}
+```
+
+This contract is implemented in `Api::V1::PricingService` while preserving caching behavior.
+
+---
+
+## Local Development / Runbook
+
+### 1) Build and run
+
+```bash
+docker compose up -d --build
+```
+
+### 2) Ensure development caching is enabled
+
+```bash
+docker compose exec interview-dev ./bin/rails dev:cache
+```
+
+### 3) Test endpoint
+
+```bash
+curl "http://localhost:3000/api/v1/pricing?period=Summer&hotel=FloatingPointResort&room=SingletonRoom"
+```
+
+### 4) Run tests
+
+```bash
+docker compose exec interview-dev ./bin/rails test
+docker compose exec interview-dev ./bin/rails test test/controllers/pricing_controller_test.rb
+```
+
+> **Note:** The `rate-api` mock enforces a 1000 requests/day limit tracked in memory.
+> If you hit `503` errors, restart the container to reset the counter:
+> ```bash
+> docker compose restart rate-api
+> ```
+
+---
+
+## Trade-offs
+
+### Why not Redis?
+
+For this assignment's single-container/single-node constraints, `:memory_store` gives the simplest architecture and lowest operational overhead.
+
+In production multi-instance deployment, shared cache (Redis) would be preferred to avoid per-instance cache fragmentation.
+
+### Why cache-aside instead of prefetch?
+
+Cache-aside is easier to reason about, has lower complexity, and only computes rates that are actually requested.
+
+---
+
+## Files Changed
+
+- `app/services/api/v1/pricing_service.rb`
+- `app/controllers/api/v1/pricing_controller.rb`
+- `test/controllers/pricing_controller_test.rb`
+- `test/services/pricing_service_test.rb`
+- `Gemfile` / `Gemfile.lock` (replaced `httparty` with `faraday`)
+- `docker-compose.yml` (stable startup command for local dev)

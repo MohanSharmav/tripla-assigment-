@@ -27,7 +27,7 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 gem "bootsnap", require: false
 
 # HTTP client for external API call
-gem 'httparty'
+gem 'faraday'
 
 # Use Rack CORS for handling Cross-Origin Resource Sharing (CORS), making cross-origin Ajax possible
 # gem "rack-cors"
@@ -44,4 +44,3 @@ group :development do
   # Live reloading for development
   gem "listen", "~> 3.3"
 end
-

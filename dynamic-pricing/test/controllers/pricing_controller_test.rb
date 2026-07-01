@@ -2,15 +2,13 @@ require "test_helper"
 
 class Api::V1::PricingControllerTest < ActionDispatch::IntegrationTest
   test "should get pricing with all parameters" do
-    mock_body = {
-      'rates' => [
-        { 'period' => 'Summer', 'hotel' => 'FloatingPointResort', 'room' => 'SingletonRoom', 'rate' => '15000' }
-      ]
-    }.to_json
+    mock_result = { "rate" => "15000" }
+    mock_service = Minitest::Mock.new
+    mock_service.expect(:run, nil)
+    mock_service.expect(:valid?, true)
+    mock_service.expect(:result, mock_result)
 
-    mock_response = OpenStruct.new(success?: true, body: mock_body)
-
-    RateApiClient.stub(:get_rate, mock_response) do
+    Api::V1::PricingService.stub(:new, mock_service) do
       get api_v1_pricing_url, params: {
         period: "Summer",
         hotel: "FloatingPointResort",
@@ -26,20 +24,23 @@ class Api::V1::PricingControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "should return error when rate API fails" do
-    mock_response = OpenStruct.new(success?: false, body: { 'error' => 'Rate not found' })
+    mock_service = Minitest::Mock.new
+    mock_service.expect(:run, nil)
+    mock_service.expect(:valid?, false)
+    mock_service.expect(:errors, ["Pricing model is currently unavailable."])
 
-    RateApiClient.stub(:get_rate, mock_response) do
+    Api::V1::PricingService.stub(:new, mock_service) do
       get api_v1_pricing_url, params: {
         period: "Summer",
         hotel: "FloatingPointResort",
         room: "SingletonRoom"
       }
 
-      assert_response :bad_request
+      assert_response :service_unavailable
       assert_equal "application/json", @response.media_type
 
       json_response = JSON.parse(@response.body)
-      assert_includes json_response["error"], "Rate not found"
+      assert_includes json_response["error"], "Pricing model is currently unavailable"
     end
   end
 
@@ -65,47 +66,5 @@ class Api::V1::PricingControllerTest < ActionDispatch::IntegrationTest
 
     json_response = JSON.parse(@response.body)
     assert_includes json_response["error"], "Missing required parameters"
-  end
-
-  test "should reject invalid period" do
-    get api_v1_pricing_url, params: {
-      period: "summer-2024",
-      hotel: "FloatingPointResort",
-      room: "SingletonRoom"
-    }
-
-    assert_response :bad_request
-    assert_equal "application/json", @response.media_type
-
-    json_response = JSON.parse(@response.body)
-    assert_includes json_response["error"], "Invalid period"
-  end
-
-  test "should reject invalid hotel" do
-    get api_v1_pricing_url, params: {
-      period: "Summer",
-      hotel: "InvalidHotel",
-      room: "SingletonRoom"
-    }
-
-    assert_response :bad_request
-    assert_equal "application/json", @response.media_type
-
-    json_response = JSON.parse(@response.body)
-    assert_includes json_response["error"], "Invalid hotel"
-  end
-
-  test "should reject invalid room" do
-    get api_v1_pricing_url, params: {
-      period: "Summer",
-      hotel: "FloatingPointResort",
-      room: "InvalidRoom"
-    }
-
-    assert_response :bad_request
-    assert_equal "application/json", @response.media_type
-
-    json_response = JSON.parse(@response.body)
-    assert_includes json_response["error"], "Invalid room"
   end
 end

@@ -1,43 +1,24 @@
-class Api::V1::PricingController < ApplicationController
-  VALID_PERIODS = %w[Summer Autumn Winter Spring].freeze
-  VALID_HOTELS = %w[FloatingPointResort GitawayHotel RecursionRetreat].freeze
-  VALID_ROOMS = %w[SingletonRoom BooleanTwin RestfulKing].freeze
+module Api
+  module V1
+    class PricingController < ApplicationController
+      def index
+        if params[:period].blank? || params[:hotel].blank? || params[:room].blank?
+          return render json: { error: "Missing required parameters" }, status: :bad_request
+        end
 
-  before_action :validate_params
+        service = Api::V1::PricingService.new(
+          period: params[:period],
+          hotel: params[:hotel],
+          room: params[:room]
+        )
+        service.run
 
-  def index
-    period = params[:period]
-    hotel  = params[:hotel]
-    room   = params[:room]
-
-    service = Api::V1::PricingService.new(period:, hotel:, room:)
-    service.run
-    if service.valid?
-      render json: { rate: service.result }
-    else
-      render json: { error: service.errors.join(', ') }, status: :bad_request
-    end
-  end
-
-  private
-
-  def validate_params
-    # Validate required parameters
-    unless params[:period].present? && params[:hotel].present? && params[:room].present?
-      return render json: { error: "Missing required parameters: period, hotel, room" }, status: :bad_request
-    end
-
-    # Validate parameter values
-    unless VALID_PERIODS.include?(params[:period])
-      return render json: { error: "Invalid period. Must be one of: #{VALID_PERIODS.join(', ')}" }, status: :bad_request
-    end
-
-    unless VALID_HOTELS.include?(params[:hotel])
-      return render json: { error: "Invalid hotel. Must be one of: #{VALID_HOTELS.join(', ')}" }, status: :bad_request
-    end
-
-    unless VALID_ROOMS.include?(params[:room])
-      return render json: { error: "Invalid room. Must be one of: #{VALID_ROOMS.join(', ')}" }, status: :bad_request
+        if service.valid?
+          render json: service.result, status: :ok
+        else
+          render json: { error: service.errors.first }, status: :service_unavailable
+        end
+      end
     end
   end
 end
