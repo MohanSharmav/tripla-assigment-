@@ -204,13 +204,50 @@ In production multi-instance deployment, shared cache (Redis) would be preferred
 
 Cache-aside is easier to reason about, has lower complexity, and only computes rates that are actually requested.
 
+
+**Test it yourself — first request (cache miss) vs subsequent requests (cache hit):**
+
+```bash
+# First request — hits upstream model (~800ms)
+curl -w "\nTime: %{time_total}s\n" \
+  "http://localhost:3000/api/v1/pricing?period=Summer&hotel=FloatingPointResort&room=SingletonRoom"
+
+# Second request within 5 min — served from memory (~3ms)
+curl -w "\nTime: %{time_total}s\n" \
+  "http://localhost:3000/api/v1/pricing?period=Summer&hotel=FloatingPointResort&room=SingletonRoom"
+```
+
+The cache reduces response time by ~99% and means 10,000 user requests/day consume only ~288 upstream calls (one per 5-minute window) instead of 10,000.
+
+**Load test (500 requests, 5 concurrent, 120s timeout):**
+
+```bash
+ab -n 500 -c 5 -s 120 "http://localhost:3000/api/v1/pricing?period=Summer&hotel=FloatingPointResort&room=SingletonRoom"
+```
+
 ---
 
-## Files Changed
+## Before Cache and after cache difference in performance
 
-- `app/services/api/v1/pricing_service.rb`
-- `app/controllers/api/v1/pricing_controller.rb`
-- `test/controllers/pricing_controller_test.rb`
-- `test/services/pricing_service_test.rb`
-- `Gemfile` / `Gemfile.lock` (replaced `httparty` with `faraday`)
-- `docker-compose.yml` (stable startup command for local dev)
+### Before Cache
+![alt text](before_cache.png)
+
+### After Cache
+
+![alt text](after_cache.png)
+
+### Performance Benchmark: Before vs. After Caching
+
+To verify the effectiveness of the caching layer and ensure the service handles the throughput requirements without exhausting the API token, I ran load tests using ApacheBench (`ab -n 500 -c 5`). 
+
+Here is the direct comparison of the system's performance before and after implementing the `PricingService` proxy:
+
+| Metric | Before Cache (Direct Proxy) | After Cache (MemoryStore) | Impact |
+| :--- | :--- | :--- | :--- |
+| **Total Time Taken** | 602.53 seconds (~10 mins) | **3.72 seconds** | ~160x Faster |
+| **Requests Per Second** | 0.83 req/sec | **134.17 req/sec** | ~161x More Throughput |
+| **Avg. Time per Request** | 1,205.06 ms | **7.45 ms** | ~161x Faster Response |
+| **Longest Request (Max)** | 60,164 ms (~60 seconds) | **2,058 ms** (~2 seconds) | Eliminated 60s Server Hangs |
+| **API Token Protection** | Exhausted (109 Errors) | **Protected (3 Errors)** | Prevented Upstream 429s |
+
+*Note: The remaining 3 errors in the cached run were deliberate defensive timeouts (graceful `503` responses) protecting the server threads while the initial cache was being populated, completely eliminating the previous 60-second queue freezes.*
