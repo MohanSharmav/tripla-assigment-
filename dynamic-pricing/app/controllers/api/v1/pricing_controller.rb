@@ -16,7 +16,7 @@ module Api
         if service.valid?
           render json: service.result, status: :ok
         else
-          render json: { error: service.errors.first }, status: :service_unavailable
+          render json: { error: service.errors.first || "Pricing model is currently unavailable." }, status: :service_unavailable
         end
       end
     end

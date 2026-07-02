@@ -1,3 +1,5 @@
+require "cgi"
+
 module Api::V1
   class PricingService < BaseService
     class UpstreamError < StandardError; end
@@ -9,7 +11,7 @@ module Api::V1
     end
 
     def run
-      cache_key = "rate_v1/#{@hotel}/#{@room}/#{@period}"
+      cache_key = "rate_v1/#{CGI.escape(@hotel)}/#{CGI.escape(@room)}/#{CGI.escape(@period)}"
       @result = Rails.cache.fetch(cache_key, expires_in: 5.minutes, race_condition_ttl: 10.seconds) do
         fetch_from_upstream
       end
@@ -22,7 +24,7 @@ module Api::V1
     def fetch_from_upstream
       base_url = ENV.fetch("RATE_API_URL", "http://rate-api:8080")
       api_url = base_url.end_with?("/pricing") ? base_url : "#{base_url}/pricing"
-      token = ENV.fetch("RATE_API_TOKEN", "04aa6f42aa03f220c2ae9a276cd68c62")
+      token = ENV.fetch("RATE_API_TOKEN")
 
       response = Faraday.post(api_url) do |req|
         req.headers["Content-Type"] = "application/json"
